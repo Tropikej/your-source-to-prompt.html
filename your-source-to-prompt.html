@@ -391,12 +391,13 @@
                 </button>
             </div>
 
+            
             <div class="bg-white rounded-lg shadow p-2 space-y-2 animate__animated animate__fadeIn">
                 <h2 class="text-lg font-semibold flex items-center gap-2" >
                     <i class="fas fa-info-circle text-blue-500"></i>
                     Additional Options
                 </h2>
-                
+
                 <div class="space-y-2">
                     <div class="flex items-center gap-2">
                         <input type="checkbox" id="includePreamble" data-tippy-content="Check to add a custom or predefined preamble before the combined files.">
@@ -420,6 +421,26 @@
                     <div id="goalOptions" class="hidden" data-tippy-content="If enabled, type your goal here.">
                         <textarea id="goalText" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 min-h-[5rem]" placeholder="Describe your goal here..." data-tippy-content="Explain the purpose or aim of combining these files."></textarea>
                     </div>
+                </div>
+            </div>
+
+             <!-- New Token Calculator Options -->
+             <div class="bg-white rounded-lg shadow p-2 space-y-2 animate__animated animate__fadeIn">
+                <h2 class="text-lg font-semibold flex items-center gap-2">
+                    <i class="fas fa-calculator text-indigo-500"></i>
+                    Token Calculator
+                </h2>
+                <div class="flex items-center gap-2">
+                    <label for="tokenCalculatorSelect" class="font-semibold" data-tippy-content="Choose the token calculation method to estimate tokens for the prompt.">Calculator:</label>
+                    <select id="tokenCalculatorSelect" class="border p-2 rounded" data-tippy-content="Select a token calculation method.">
+                        <option value="cl100k">Exact (cl100k_base)</option>
+                        <option value="chars">Approx. (1 token = 4 characters)</option>
+                        <option value="whitespace">Whitespace Split</option>
+                    </select>
+                </div>
+                <div data-tippy-content="The estimated number of tokens in the combined output.">
+                    <span>Total tokens:</span>
+                    <span id="totalTokensDisplay" class="transition-number" data-tippy-content="Token count">0</span>
                 </div>
             </div>
 
@@ -533,6 +554,7 @@
     <script src="https://cdn.jsdelivr.net/npm/terser@5.14.2/dist/bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html-minifier-terser@7.0.0/dist/html-minifier-terser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/csso@5.0.5/dist/csso.min.js"></script>
+    <script src="https://unpkg.com/@dqbd/tiktoken/dist/tiktoken.umd.js"></script>
     <script>
         // Make dark mode the default
         localStorage.setItem('darkModeEnabled', 'true');
@@ -757,6 +779,11 @@
             removeComments.disabled = isLoading;
         }
 
+        function isBinaryFile(name) {
+            const binaryExtensions = ['.dll', '.lib', '.exe', '.bin', '.dat']; // Add any additional binary extensions here
+            return binaryExtensions.some(ext => name.toLowerCase().endsWith(ext));
+        }
+
         function isTextFile(name) {
             const textExtensions = [
                 '.txt', '.md', '.csv', '.js', '.css', '.html', 
@@ -765,7 +792,7 @@
                 '.config', '.env', '.gitignore', '.sql', '.ts',
                 '.tsx', '.schema', '.mjs', '.cjs', '.jsx', '.rs',
                 '.go', '.php', '.rb', '.toml', '.prisma', '.bat', '.ps1',
-                '.svelte', '.lock'
+                '.svelte', '.lock', '.gyp'
             ];
              // Check for exact matches for files without extensions
             const exactMatches = ['Makefile', 'Dockerfile'];
@@ -809,7 +836,7 @@
             return { size, lines };
         }
 
-        async function buildFileTree(handle, path = '', container = fileTree, depth = 0) {
+async function buildFileTree(handle, path = '', container = fileTree, depth = 0) {
             const entries = [];
             for await (const entry of handle.values()) {
                 entries.push(entry);
@@ -826,6 +853,7 @@
                 const entry = entries[i];
                 const entryPath = path ? `${path}/${entry.name}` : entry.name;
                 if (ignoreFilter && ignoreFilter.ignores(entryPath)) {
+                    console.log("Ignored file ", entryPath);
                     continue;
                 }
 
@@ -857,31 +885,42 @@
                     const subContainer = document.createElement('div');
                     div.appendChild(subContainer);
                     const subHandle = await handle.getDirectoryHandle(entry.name);
+                    // DEBUG
+                    console.log("Detected directory: ", entry.name);
                     await buildFileTree(subHandle, entryPath, subContainer, depth + 1);
                 } else {
                     const fileHandle = await handle.getFileHandle(entry.name);
                     const { size, lines } = await getFileSizeAndLines(fileHandle);
                     const isText = isTextFile(entry.name);
-                    if (isText) {
-                        fileHandles.push({ handle: fileHandle, path: entryPath, size, lines });
-                    }
+                    const isBinary = isBinaryFile(entry.name);
                     const fileDiv = document.createElement('div');
                     fileDiv.className = 'flex items-center mb-1';
-                    if (isText) {
+                    const label = document.createElement('span');
+                    
+                    // DEBUG: print out file characteristics
+                    console.log("Detected file: ", entry.name, " | isText: ", isText, " | isBinary: ", isBinary, " | size: ", size, " | lines: ", lines);
+
+                    if (isText || isBinary) {
                         const checkbox = document.createElement('input');
                         checkbox.type = 'checkbox';
                         checkbox.className = 'mr-2';
                         checkbox.dataset.path = entryPath;
                         checkbox.dataset.type = 'file';
-                        checkbox.setAttribute('data-tippy-content', 'Check this file to include it in the combined output.');
+                        checkbox.setAttribute('data-tippy-content', isText ?
+                            'Check this file to include it in the combined output.' :
+                            'Check this binary file to include it in the ASCII structure. Its content will not be displayed.');
                         fileDiv.appendChild(checkbox);
-                    }
-                    const label = document.createElement('span');
-                    label.className = isText ? 'text-gray-800' : 'text-gray-400';
-                    if (isText) {
-                        label.textContent = `📄 ${entry.name} (${(size / 1024).toFixed(2)} KB | ${lines.toLocaleString()} lines)`;
-                        label.setAttribute('data-tippy-content', 'A selectable text file. Check to include in the combined output.');
+                        fileHandles.push({ handle: fileHandle, path: entryPath, size, lines, isBinary: isBinary });
+                        label.className = 'text-gray-800';
+                        if (isText) {
+                            label.textContent = `📄 ${entry.name} (${(size / 1024).toFixed(2)} KB | ${lines.toLocaleString()} lines)`;
+                            label.setAttribute('data-tippy-content', 'A selectable text file. Check to include in the combined output.');
+                        } else {
+                            label.textContent = `📄 ${entry.name} (binary file)`;
+                            label.setAttribute('data-tippy-content', 'Binary file; its content will be omitted in the combined output.');
+                        }
                     } else {
+                        label.className = 'text-gray-400';
                         label.textContent = `📄 ${entry.name} (non-text file)`;
                         label.setAttribute('data-tippy-content', 'Non-text file; cannot be included in the combined output.');
                     }
@@ -891,7 +930,7 @@
                 container.appendChild(div);
             }
         }
-
+		
         function showPresetMessage(message, type = 'error') {
             const messageDiv = document.getElementById('presetMessage');
             messageDiv.textContent = message;
@@ -1082,7 +1121,7 @@
                     folderCb.checked = visibleChildFiles.every(c => c.checked);
                 } else {
                     folderCb.checked = false;
-                }
+                }	
             });
         }
 
@@ -1109,38 +1148,55 @@
         });
 
         async function buildAsciiTreeStructure(selectedFiles) {
-            const root = {};
-            for (const f of selectedFiles) {
-                const parts = f.path.split('/');
-                let current = root;
-                for (let i = 0; i < parts.length; i++) {
-                    const part = parts[i];
-                    if (!current[part]) current[part] = { __isFile: (i === parts.length - 1), __size: f.size, __lines: f.lines };
-                    if (i < parts.length - 1) {
-                        current = current[part];
-                    }
+		  const root = {};
+		  // Build the tree and store file properties, including an isBinary flag.
+		  for (const f of selectedFiles) {
+			const parts = f.path.split('/');
+			let current = root;
+			for (let i = 0; i < parts.length; i++) {
+			  const part = parts[i];
+			  if (!current[part]) {
+				current[part] = { 
+				  __isFile: (i === parts.length - 1), 
+				  __size: f.size, 
+				  __lines: f.lines,
+				  __isBinary: f.isBinary
+				};
+			  }
+			  if (i < parts.length - 1) {
+				current = current[part];
+			  }
+			}
+		  }
+		  // Print the tree
+		  function printTree(obj, prefix = '', isLast = true) {
+			const keys = Object.keys(obj).filter(k => !k.startsWith('__')).sort();
+			let lines = [];
+			keys.forEach((key, index) => {
+			  const val = obj[key];
+			  const last = (index === keys.length - 1);
+			  const connector = last ? '└── ' : '├── ';
+			  if (val.__isFile) {
+				const sizeKb = (val.__size / 1024).toFixed(2);
+				// For binary files, omit the "Lines" info.
+                // Log to console if file is binary
+                if (val.__isBinary) {
+                    console.log(`Binary file found : ${key}`);
+                } else {
+                    console.log(`Text file found : ${key}`);
                 }
-            }
-            function printTree(obj, prefix = '', isLast = true) {
-                const keys = Object.keys(obj).filter(k => !k.startsWith('__')).sort();
-                let lines = [];
-                keys.forEach((key, index) => {
-                    const val = obj[key];
-                    const last = (index === keys.length - 1);
-                    const connector = last ? '└── ' : '├── ';
-                    if (val.__isFile) {
-                        const sizeKb = (val.__size / 1024).toFixed(2);
-                        lines.push(prefix + connector + key + ` (Size: ${sizeKb}kb; Lines: ${val.__lines})`);
-                    } else {
-                        lines.push(prefix + connector + key + '/');
-                        const newPrefix = prefix + (last ? '    ' : '│   ');
-                        lines = lines.concat(printTree(val, newPrefix, last));
-                    }
-                });
-                return lines;
-            }
-            return printTree(root).join('\n');
-        }
+                let lineInfo = val.__isBinary ? '' : `; Lines: ${val.__lines}`;
+				lines.push(prefix + connector + key + ` (Size: ${sizeKb}kb${lineInfo})`);
+			  } else {
+				lines.push(prefix + connector + key + '/');
+				const newPrefix = prefix + (last ? '    ' : '│   ');
+				lines = lines.concat(printTree(val, newPrefix, last));
+			  }
+			});
+			return lines;
+		  }
+		  return printTree(root).join('\n');
+		}
 
         async function minifyContent(path, content) {
             const lowerPath = path.toLowerCase();
@@ -1223,7 +1279,27 @@
             return processedLines.join('\n');
         }
 
-        combineBtn.addEventListener('click', async () => {
+        // --- NEW: Update token count when token calculator selection changes ---
+        const tokenCalculatorSelect = document.getElementById('tokenCalculatorSelect');
+        tokenCalculatorSelect.addEventListener('change', () => {
+            if (combinedOutput.value.trim()) {
+                const finalOutput = combinedOutput.value;
+                let tokenCount = 0;
+                if (tokenCalculatorSelect.value === 'cl100k' && window.tiktoken && typeof window.tiktoken.get_encoding === 'function') {
+                    const enc = window.tiktoken.get_encoding("cl100k_base");
+                    tokenCount = enc.encode(finalOutput).length;
+                } else if (tokenCalculatorSelect.value === 'whitespace') {
+                    tokenCount = finalOutput.trim().split(/\s+/).length;
+                } else {
+                    tokenCount = Math.ceil(finalOutput.length / 4);
+                }
+                document.getElementById('totalTokensDisplay').textContent = tokenCount.toLocaleString();
+            }
+        });
+        // --- END NEW ---
+
+		
+ combineBtn.addEventListener('click', async () => {
             const selectedPaths = Array.from(fileTree.querySelectorAll('input[type="checkbox"]:checked[data-type="file"]'))
                 .map(cb => cb.dataset.path);
             if (selectedPaths.length === 0) {
@@ -1240,16 +1316,28 @@
                     loadingText.textContent = `Processing: ${path}`;
                     const fh = fileHandles.find(f => f.path === path);
                     if (!fh) continue;
-                    const file = await fh.handle.getFile();
-                    const content = await file.text();
-                    selectedFiles.push({
-                        path,
-                        content,
-                        size: fh.size,
-                        lines: fh.lines
-                    });
-                    originalTotalSize += fh.size;
-                    originalTotalLines += fh.lines;
+                    if (fh.isBinary) {
+                        // For binary files, do not read the gibberish content
+                        selectedFiles.push({
+                            path,
+                            content: `[Binary file content omitted]`,
+                            size: fh.size,
+                            lines: fh.lines,
+                            isBinary: true
+                        });
+                        
+                    } else {
+                        const file = await fh.handle.getFile();
+                        const content = await file.text();
+                        selectedFiles.push({
+                            path,
+                            content,
+                            size: fh.size,
+                            lines: fh.lines
+                        });
+                        originalTotalSize += fh.size;
+                        originalTotalLines += fh.lines;
+                    }
                 }
 
                 let finalOutput = '';
@@ -1271,7 +1359,6 @@
                 let afterMinifyTotalSize = 0;
                 let afterMinifyTotalLines = 0;
 
-                // Remove comments first if checked
                 for (const f of selectedFiles) {
                     let fileContent = f.content.trim();
                     if (removeComments.checked) {
@@ -1291,7 +1378,6 @@
                     return { path: f.path, content: fileContent };
                 });
 
-                // Then minify if checked
                 if (minifyOutput.checked) {
                     let tempFiles = [];
                     for (const f of intermediateFiles) {
@@ -1301,17 +1387,32 @@
                     intermediateFiles = tempFiles;
                 }
 
-                // After all transformations
                 for (const f of intermediateFiles) {
                     combinedContent += `---\n${f.path}\n---\n${f.content}\n\n`;
                 }
 
-                // Compute final stats
                 const finalSize = new Blob([combinedContent]).size;
                 const finalLines = combinedContent.split('\n').length;
 
                 finalOutput += combinedContent.trim();
                 combinedOutput.value = finalOutput;
+
+                // --- NEW: Calculate token count using the selected method ---
+                const tokenCalculatorSelect = document.getElementById('tokenCalculatorSelect');
+                const selectedMethod = tokenCalculatorSelect.value;
+                let tokenCount = 0;
+                if (selectedMethod === 'cl100k' && window.tiktoken && typeof window.tiktoken.get_encoding === 'function') {
+                    const enc = window.tiktoken.get_encoding("cl100k_base");
+                    tokenCount = enc.encode(finalOutput).length;
+                } else if (selectedMethod === 'whitespace') {
+                    tokenCount = finalOutput.trim().split(/\s+/).length;
+                } else { // Default to approximate method
+                    tokenCount = Math.ceil(finalOutput.length / 4);
+                }
+                document.getElementById('totalTokensDisplay').textContent = tokenCount.toLocaleString();
+                // --- END NEW ---
+
+
                 output.classList.remove('hidden');
                 showGlobalMessage('Files combined successfully!', 'success');
                 output.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1344,7 +1445,7 @@
                 setLoading(false);
             }
         });
-
+		
         downloadBtn.addEventListener('click', () => {
             const blob = new Blob([combinedOutput.value], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
@@ -1423,26 +1524,36 @@
         }
 
         function updateTally() {
-            const selectedCheckboxes = Array.from(fileTree.querySelectorAll('input[type="checkbox"][data-type="file"]:checked'));
-            let totalSize = 0;
-            let totalLines = 0;
-            for (const cb of selectedCheckboxes) {
-                const fh = fileHandles.find(f => f.path === cb.dataset.path);
-                if (fh) {
-                    totalSize += fh.size;
-                    totalLines += fh.lines;
-                }
-            }
-            animateNumber(totalSizeDisplay, parseFloat(totalSizeDisplay.textContent.replace(' KB','')) || 0, (totalSize / 1024).toFixed(2), ' KB');
-            animateNumber(totalLinesDisplay, parseInt(totalLinesDisplay.textContent.replace(/,/g,''), 10) || 0, totalLines, '');
-            if ((totalSize / 1024) > 500) {
-                tallyWarning.textContent = "Warning: probably too large to fit in Claude 3.5 Sonnet context window!";
-            } else if ((totalSize / 1024) > 200) {
-                tallyWarning.textContent = "Warning: probably too large to fit in GPT-4o or o1 context window!";
-            } else {
-                tallyWarning.textContent = "";
-            }
-        }
+			const selectedCheckboxes = Array.from(fileTree.querySelectorAll('input[type="checkbox"][data-type="file"]:checked'));
+			let totalSize = 0;
+			let totalLines = 0;
+			for (const cb of selectedCheckboxes) {
+				const fh = fileHandles.find(f => f.path === cb.dataset.path);
+				if (fh && !fh.isBinary) {
+					totalSize += fh.size;
+					totalLines += fh.lines;
+				}
+			}
+			animateNumber(
+				totalSizeDisplay,
+				parseFloat(totalSizeDisplay.textContent.replace(' KB','')) || 0,
+				parseFloat((totalSize / 1024).toFixed(2)),
+				' KB'
+			);
+			animateNumber(
+				totalLinesDisplay,
+				parseInt(totalLinesDisplay.textContent.replace(/,/g,''), 10) || 0,
+				totalLines,
+				''
+			);
+			if ((totalSize / 1024) > 500) {
+				tallyWarning.textContent = "Warning: probably too large to fit in Claude 3.5 Sonnet context window!";
+			} else if ((totalSize / 1024) > 200) {
+				tallyWarning.textContent = "Warning: probably too large to fit in GPT-4o or o1 context window!";
+			} else {
+				tallyWarning.textContent = "";
+			}
+		}
 
         function animateNumber(element, start, end, suffix) {
             let current = start;
