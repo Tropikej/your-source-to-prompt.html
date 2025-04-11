@@ -792,7 +792,10 @@
                 '.config', '.env', '.gitignore', '.sql', '.ts',
                 '.tsx', '.schema', '.mjs', '.cjs', '.jsx', '.rs',
                 '.go', '.php', '.rb', '.toml', '.prisma', '.bat', '.ps1',
-                '.svelte', '.lock', '.gyp'
+                '.svelte', '.lock', '.gyp',
+                '.cs', '.ino',
+				'.kt', '.kts',
+				'.gradle', '.properties'
             ];
              // Check for exact matches for files without extensions
             const exactMatches = ['Makefile', 'Dockerfile'];
@@ -837,100 +840,124 @@
         }
 
 async function buildFileTree(handle, path = '', container = fileTree, depth = 0) {
-            const entries = [];
-            for await (const entry of handle.values()) {
-                entries.push(entry);
-                if (entries.length % 100 === 0) {
-                    loadingText.textContent = `Processing folder contents... (${entries.length} items found)`;
-                }
-            }
-            entries.sort((a, b) => {
-                if (a.kind === b.kind) return a.name.localeCompare(b.name);
-                return a.kind === 'directory' ? -1 : 1;
-            });
-
-            for (let i = 0; i < entries.length; i++) {
-                const entry = entries[i];
-                const entryPath = path ? `${path}/${entry.name}` : entry.name;
-                if (ignoreFilter && ignoreFilter.ignores(entryPath)) {
-                    console.log("Ignored file ", entryPath);
-                    continue;
-                }
-
-                const isLast = i === entries.length - 1;
-                const div = document.createElement('div');
-                div.className = `tree-line ${isLast ? 'tree-last' : ''}`;
-                if (depth > 0) {
-                    div.classList.add('tree-indent');
-                }
-
-                pathToElement[entryPath] = div;
-
-                if (entry.kind === 'directory') {
-                    const folderDiv = document.createElement('div');
-                    folderDiv.className = 'font-bold mb-1 folder-name flex items-center gap-2';
-                    const folderCheckbox = document.createElement('input');
-                    folderCheckbox.type = 'checkbox';
-                    folderCheckbox.className = 'mr-2';
-                    folderCheckbox.dataset.path = entryPath;
-                    folderCheckbox.dataset.type = 'directory';
-                    folderCheckbox.setAttribute('data-tippy-content', 'Check/uncheck this folder to select/deselect all its text files.');
-                    folderDiv.appendChild(folderCheckbox);
-                    const folderLabel = document.createElement('span');
-                    folderLabel.textContent = `📁 ${entry.name}`;
-                    folderLabel.setAttribute('data-tippy-content', 'Folder in your project. Check its box to select all files inside.');
-                    folderDiv.appendChild(folderLabel);
-                    div.appendChild(folderDiv);
-
-                    const subContainer = document.createElement('div');
-                    div.appendChild(subContainer);
-                    const subHandle = await handle.getDirectoryHandle(entry.name);
-                    // DEBUG
-                    console.log("Detected directory: ", entry.name);
-                    await buildFileTree(subHandle, entryPath, subContainer, depth + 1);
-                } else {
-                    const fileHandle = await handle.getFileHandle(entry.name);
-                    const { size, lines } = await getFileSizeAndLines(fileHandle);
-                    const isText = isTextFile(entry.name);
-                    const isBinary = isBinaryFile(entry.name);
-                    const fileDiv = document.createElement('div');
-                    fileDiv.className = 'flex items-center mb-1';
-                    const label = document.createElement('span');
-                    
-                    // DEBUG: print out file characteristics
-                    console.log("Detected file: ", entry.name, " | isText: ", isText, " | isBinary: ", isBinary, " | size: ", size, " | lines: ", lines);
-
-                    if (isText || isBinary) {
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.className = 'mr-2';
-                        checkbox.dataset.path = entryPath;
-                        checkbox.dataset.type = 'file';
-                        checkbox.setAttribute('data-tippy-content', isText ?
-                            'Check this file to include it in the combined output.' :
-                            'Check this binary file to include it in the ASCII structure. Its content will not be displayed.');
-                        fileDiv.appendChild(checkbox);
-                        fileHandles.push({ handle: fileHandle, path: entryPath, size, lines, isBinary: isBinary });
-                        label.className = 'text-gray-800';
-                        if (isText) {
-                            label.textContent = `📄 ${entry.name} (${(size / 1024).toFixed(2)} KB | ${lines.toLocaleString()} lines)`;
-                            label.setAttribute('data-tippy-content', 'A selectable text file. Check to include in the combined output.');
-                        } else {
-                            label.textContent = `📄 ${entry.name} (binary file)`;
-                            label.setAttribute('data-tippy-content', 'Binary file; its content will be omitted in the combined output.');
-                        }
-                    } else {
-                        label.className = 'text-gray-400';
-                        label.textContent = `📄 ${entry.name} (non-text file)`;
-                        label.setAttribute('data-tippy-content', 'Non-text file; cannot be included in the combined output.');
-                    }
-                    fileDiv.appendChild(label);
-                    div.appendChild(fileDiv);
-                }
-                container.appendChild(div);
-            }
+    const entries = [];
+    for await (const entry of handle.values()) {
+        entries.push(entry);
+        if (entries.length % 100 === 0) {
+            loadingText.textContent = `Processing folder contents... (${entries.length} items found)`;
         }
-		
+    }
+    entries.sort((a, b) => {
+        if (a.kind === b.kind) return a.name.localeCompare(b.name);
+        return a.kind === 'directory' ? -1 : 1;
+    });
+
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const entryPath = path ? `${path}/${entry.name}` : entry.name;
+        if (ignoreFilter && ignoreFilter.ignores(entryPath)) {
+            console.log("Ignored file ", entryPath);
+            continue;
+        }
+
+        const isLast = i === entries.length - 1;
+        const div = document.createElement('div');
+        div.className = `tree-line ${isLast ? 'tree-last' : ''}`;
+        if (depth > 0) {
+            div.classList.add('tree-indent');
+        }
+        pathToElement[entryPath] = div;
+
+        if (entry.kind === 'directory') {
+            // Create the folder header container with toggle button.
+            const folderDiv = document.createElement('div');
+            folderDiv.className = 'font-bold mb-1 folder-name flex items-center gap-2';
+
+            // Create toggle button for expand/collapse.
+            const toggleButton = document.createElement('button');
+            toggleButton.textContent = '▼'; // initially expanded
+            toggleButton.className = 'toggle-button mr-2';
+            
+            // Create the sub-container that will hold child entries.
+            const subContainer = document.createElement('div');
+            subContainer.className = 'tree-indent';
+            // Toggle inner folder visibility when clicking the button.
+            toggleButton.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (subContainer.style.display === 'none') {
+                    subContainer.style.display = 'block';
+                    toggleButton.textContent = '▼';
+                } else {
+                    subContainer.style.display = 'none';
+                    toggleButton.textContent = '►';
+                }
+            });
+            folderDiv.appendChild(toggleButton);
+
+            // Create folder checkbox.
+            const folderCheckbox = document.createElement('input');
+            folderCheckbox.type = 'checkbox';
+            folderCheckbox.className = 'mr-2';
+            folderCheckbox.dataset.path = entryPath;
+            folderCheckbox.dataset.type = 'directory';
+            folderCheckbox.setAttribute('data-tippy-content', 'Check/uncheck this folder to select/deselect all its text files.');
+            folderDiv.appendChild(folderCheckbox);
+
+            // Create folder label.
+            const folderLabel = document.createElement('span');
+            folderLabel.textContent = `📁 ${entry.name}`;
+            folderLabel.setAttribute('data-tippy-content', 'Folder in your project. Check its box to select all files inside.');
+            folderDiv.appendChild(folderLabel);
+            div.appendChild(folderDiv);
+
+            // Process children.
+            const subHandle = await handle.getDirectoryHandle(entry.name);
+            console.log("Detected directory: ", entry.name);
+            await buildFileTree(subHandle, entryPath, subContainer, depth + 1);
+            div.appendChild(subContainer);
+        } else {
+            // Process file entries.
+            const fileHandle = await handle.getFileHandle(entry.name);
+            const { size, lines } = await getFileSizeAndLines(fileHandle);
+            const isText = isTextFile(entry.name);
+            const isBinary = isBinaryFile(entry.name);
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'flex items-center mb-1';
+            const label = document.createElement('span');
+            
+            console.log("Detected file: ", entry.name, " | isText: ", isText, " | isBinary: ", isBinary, " | size: ", size, " | lines: ", lines);
+
+            if (isText || isBinary) {
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'mr-2';
+                checkbox.dataset.path = entryPath;
+                checkbox.dataset.type = 'file';
+                checkbox.setAttribute('data-tippy-content', isText ?
+                    'Check this file to include it in the combined output.' :
+                    'Check this binary file to include it in the ASCII structure. Its content will not be displayed.');
+                fileDiv.appendChild(checkbox);
+                fileHandles.push({ handle: fileHandle, path: entryPath, size, lines, isBinary: isBinary });
+                label.className = 'text-gray-800';
+                if (isText) {
+                    label.textContent = `📄 ${entry.name} (${(size / 1024).toFixed(2)} KB | ${lines.toLocaleString()} lines)`;
+                    label.setAttribute('data-tippy-content', 'A selectable text file. Check to include in the combined output.');
+                } else {
+                    label.textContent = `📄 ${entry.name} (binary file)`;
+                    label.setAttribute('data-tippy-content', 'Binary file; its content will be omitted in the combined output.');
+                }
+            } else {
+                label.className = 'text-gray-400';
+                label.textContent = `📄 ${entry.name} (non-text file)`;
+                label.setAttribute('data-tippy-content', 'Non-text file; cannot be included in the combined output.');
+            }
+            fileDiv.appendChild(label);
+            div.appendChild(fileDiv);
+        }
+        container.appendChild(div);
+    }
+}
+
         function showPresetMessage(message, type = 'error') {
             const messageDiv = document.getElementById('presetMessage');
             messageDiv.textContent = message;
@@ -1121,7 +1148,7 @@ async function buildFileTree(handle, path = '', container = fileTree, depth = 0)
                     folderCb.checked = visibleChildFiles.every(c => c.checked);
                 } else {
                     folderCb.checked = false;
-                }	
+                }
             });
         }
 
